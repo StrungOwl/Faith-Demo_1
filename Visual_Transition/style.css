@@ -1,0 +1,52 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    overflow: hidden;
+    background-color: #000000;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#canvas-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
+.visual-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.visual-layer canvas {
+    display: block;
+}
+
+#visual1-container {
+    z-index: 1;
+    opacity: 1;
+}
+
+#visual2-container {
+    z-index: 2;
+    opacity: 0;
+}
+
+#glitch-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10;
+    pointer-events: none;
+}
