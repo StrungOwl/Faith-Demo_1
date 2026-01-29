@@ -5,12 +5,48 @@ let noiseStrength = 0.5;
 let timeOffset = 0;
 let maxDist;
 let numLayers = 5;
+let blackHoleBuffer;
+
+// Color palette system
+let animateColors = false; // Set to false to keep palette1 only
+let colorTime = 0;
+let cycleDuration = 10; // seconds for full cycle
+
+// Palette 1: From reference image (HSB values)
+let palette1 = [
+    [57, 67, 97],    // Yellow #F7F052
+    [27, 86, 95],    // Orange #F28123
+    [14, 83, 83],    // Burnt orange #D34E24
+    [37, 69, 34],    // Brown #563F1B
+    [174, 51, 45]    // Teal #38726C
+];
+
+// Palette 2: Complementary/contrasting cool palette
+let palette2 = [
+    [200, 70, 90],   // Cyan-blue
+    [260, 65, 85],   // Purple
+    [320, 60, 80],   // Magenta-pink
+    [220, 50, 50],   // Dark blue
+    [280, 45, 60]    // Violet
+];
+
+// Palette 3: Warm sunset palette
+let palette3 = [
+    [350, 80, 95],   // Red
+    [20, 90, 100],   // Bright orange
+    [45, 85, 95],    // Gold
+    [10, 70, 60],    // Dark red
+    [30, 60, 70]     // Tan
+];
 
 function setup() {
     createCanvas(windowWidth, windowHeight);
     colorMode(HSB, 360, 100, 100, 100);
 
     maxDist = max(width, height) * 0.7;
+
+    // Pre-render the blurred black hole once
+    createBlackHoleBuffer();
 
     // Create particles distributed across 5 layers
     let particlesPerLayer = floor(numParticles / numLayers);
@@ -27,7 +63,8 @@ function draw() {
     // Create tracer/motion blur effect
     background(0, 0, 0, 12);
 
-    timeOffset += 0.02;
+    timeOffset += 0.04;
+    colorTime += deltaTime / 1000; // Convert to seconds
 
     // Particles are created in layer order (back-to-front)
     for (let particle of particles) {
@@ -47,25 +84,79 @@ function getFlowFieldAngle(x, y) {
     return noiseValue * TWO_PI * 2;
 }
 
-function drawBlackHole() {
+// Get interpolated color from palettes based on time
+function getCurrentPalette() {
+    // If animation is disabled, return palette1
+    if (!animateColors) {
+        return palette1;
+    }
+
+    // Progress through cycle (0 to 1 over cycleDuration seconds)
+    let cycleProgress = (colorTime % cycleDuration) / cycleDuration;
+
+    // Divide cycle into 3 phases: palette1->2, palette2->3, palette3->1
+    let phase = cycleProgress * 3;
+    let phaseIndex = floor(phase);
+    let phaseLerp = phase - phaseIndex;
+
+    // Smooth easing for transitions
+    phaseLerp = phaseLerp * phaseLerp * (3 - 2 * phaseLerp);
+
+    let fromPalette, toPalette;
+    if (phaseIndex === 0) {
+        fromPalette = palette1;
+        toPalette = palette2;
+    } else if (phaseIndex === 1) {
+        fromPalette = palette2;
+        toPalette = palette3;
+    } else {
+        fromPalette = palette3;
+        toPalette = palette1;
+    }
+
+    // Interpolate each color in the palette
+    let currentPalette = [];
+    for (let i = 0; i < fromPalette.length; i++) {
+        let fromColor = color(fromPalette[i][0], fromPalette[i][1], fromPalette[i][2]);
+        let toColor = color(toPalette[i][0], toPalette[i][1], toPalette[i][2]);
+        let lerpedColor = lerpColor(fromColor, toColor, phaseLerp);
+        currentPalette.push([hue(lerpedColor), saturation(lerpedColor), brightness(lerpedColor)]);
+    }
+
+    return currentPalette;
+}
+
+function createBlackHoleBuffer() {
     let centerX = width / 2;
     let centerY = height / 2;
     let blackHoleSize = min(width, height) * 0.15;
 
-    // Draw event horizon glow
+    // Create buffer and set color mode
+    blackHoleBuffer = createGraphics(width, height);
+    blackHoleBuffer.colorMode(HSB, 360, 100, 100, 100);
+
+    // Draw event horizon glow on buffer
     for (let i = 10; i > 0; i--) {
         let alpha = map(i, 10, 0, 0, 25);
         let size = blackHoleSize + (i * 15);
 
         // Dark purple/blue glow (HSB)
-        fill(260, 75, 16, alpha);
-        noStroke();
-        ellipse(centerX, centerY, size, size);
+        blackHoleBuffer.fill(260, 75, 16, alpha);
+        blackHoleBuffer.noStroke();
+        blackHoleBuffer.ellipse(centerX, centerY, size, size);
     }
 
-    // Draw the black hole itself
-    fill(0, 0, 0);
-    ellipse(centerX, centerY, blackHoleSize, blackHoleSize);
+    // Draw the black hole itself on buffer
+    blackHoleBuffer.fill(0, 0, 0);
+    blackHoleBuffer.ellipse(centerX, centerY, blackHoleSize, blackHoleSize);
+
+    // Apply blur filter once
+    blackHoleBuffer.filter(BLUR, 4);
+}
+
+function drawBlackHole() {
+    // Just draw the pre-rendered blurred buffer
+    image(blackHoleBuffer, 0, 0);
 }
 
 class Particle {
@@ -92,16 +183,16 @@ class Particle {
         this.size = random(sizeRange[layer][0], sizeRange[layer][1]);
 
         // Brightness: darkest at back, brightest at front (0-100 scale)
-        this.brightness = map(layer, 0, 4, 40, 100);
+        this.brightness = map(layer, 0, 4, 15, 100);
 
         // Alpha/opacity: more opaque so layers are visible
         this.alpha = map(layer, 0, 4, 50, 85);
 
         // Speed varies by layer
-        this.speed = random(2 + layer * 0.5, 4 + layer * 1);
+        this.speed = random(4 + layer * 1, 8 + layer * 2);
 
         // Rotation direction alternates with movement
-        this.rotationSpeed = this.movesOutward ? 0.03 + layer * 0.01 : -(0.03 + layer * 0.01);
+        this.rotationSpeed = this.movesOutward ? 0.04 + layer * 0.02 : -(0.04 + layer * 0.02);
 
         // Z-depth for scaling
         this.z = map(layer, 0, 4, 0.6, 1.2);
@@ -115,27 +206,17 @@ class Particle {
             this.radius = 30 + progress * (maxDist - 30);
         }
 
-        this.color = this.getRandomColor();
+        // Store palette index instead of fixed color - color will be computed from current palette
+        this.colorIndex = floor(random(palette1.length));
 
         this.trail = [];
         this.trailLength = map(layer, 0, 4, 25, 45);
     }
 
-    getRandomColor() {
-        // HSB colors: [hue, saturation, brightness]
-        const colors = [
-            [52, 100, 100],    // Yellow
-            [144, 100, 100],   // Green
-            [198, 100, 100],   // Cyan
-            [300, 100, 100],   // Magenta
-            [282, 100, 100],   // Purple
-            [24, 100, 100],    // Orange
-            [325, 100, 100],   // Pink
-            [96, 100, 100],    // Lime
-            [42, 100, 100],    // Amber
-            [275, 100, 100]    // Violet
-        ];
-        return random(colors);
+    getCurrentColor() {
+        // Get interpolated color from current palette based on stored index
+        let currentPalette = getCurrentPalette();
+        return currentPalette[this.colorIndex];
     }
 
     update() {
@@ -185,8 +266,9 @@ class Particle {
 
         let scaledSize = this.size * this.z;
 
-        let h = this.color[0];
-        let s = this.color[1];
+        let currentColor = this.getCurrentColor();
+        let h = currentColor[0];
+        let s = currentColor[1];
         let b = this.brightness; // Use layer-based brightness
 
         // Draw trail
@@ -222,6 +304,9 @@ class Particle {
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
     maxDist = max(width, height) * 0.7;
+
+    // Recreate the blurred black hole for new size
+    createBlackHoleBuffer();
 
     // Recreate particles across all layers
     particles = [];
