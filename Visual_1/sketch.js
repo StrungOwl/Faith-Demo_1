@@ -7,6 +7,12 @@ let maxDist;
 let numLayers = 5;
 let blackHoleBuffer;
 
+// Alpha animation
+let foreAlpha = 0;
+let maxAlpha = 60; // Maximum alpha for foreground layer
+let alphaTime = 0;
+let alphaCycleSpeed = 0.02; // Controls how fast the fade cycles
+
 // Color palette system
 let animateColors = false; // Set to false to keep palette1 only
 let colorTime = 0;
@@ -43,7 +49,7 @@ function setup() {
     createCanvas(windowWidth, windowHeight);
     colorMode(HSB, 360, 100, 100, 100);
 
-    maxDist = max(width, height) * 0.7;
+    maxDist = width * 0.7;
 
     // Pre-render the blurred black hole once
     createBlackHoleBuffer();
@@ -65,6 +71,10 @@ function draw() {
 
     timeOffset += 0.04;
     colorTime += deltaTime / 1000; // Convert to seconds
+
+    // Animate foreAlpha using sin for smooth fade in/out
+    alphaTime += alphaCycleSpeed;
+    foreAlpha = (sin(alphaTime) + 1) * 0.5 * maxAlpha; // Maps sin(-1 to 1) to (0 to maxAlpha)
 
     // Particles are created in layer order (back-to-front)
     for (let particle of particles) {
@@ -129,7 +139,8 @@ function getCurrentPalette() {
 function createBlackHoleBuffer() {
     let centerX = width / 2;
     let centerY = height / 2;
-    let blackHoleSize = min(width, height) * 0.15;
+    let blackHoleSize = width * 0.15;
+    let glowStep = width * 0.01; // Scale glow expansion with width
 
     // Create buffer and set color mode
     blackHoleBuffer = createGraphics(width, height);
@@ -138,7 +149,7 @@ function createBlackHoleBuffer() {
     // Draw event horizon glow on buffer
     for (let i = 10; i > 0; i--) {
         let alpha = map(i, 10, 0, 0, 25);
-        let size = blackHoleSize + (i * 15);
+        let size = blackHoleSize + (i * glowStep);
 
         // Dark purple/blue glow (HSB)
         blackHoleBuffer.fill(260, 75, 16, alpha);
@@ -151,7 +162,8 @@ function createBlackHoleBuffer() {
     blackHoleBuffer.ellipse(centerX, centerY, blackHoleSize, blackHoleSize);
 
     // Apply blur filter once
-    blackHoleBuffer.filter(BLUR, 4);
+    let blurAmount = max(2, width * 0.003);
+    blackHoleBuffer.filter(BLUR, blurAmount);
 }
 
 function drawBlackHole() {
@@ -173,23 +185,25 @@ class Particle {
         this.movesOutward = (layer % 2 === 0);
 
         // Size: biggest at back (layer 0), smallest at front (layer 4)
+        // Sizes scale based on screen width
         let sizeRange = [
-            [400, 500],  // Layer 0 - biggest
-            [200, 350],  // Layer 1
-            [80, 150],   // Layer 2
-            [30, 70],    // Layer 3
-            [8, 25]      // Layer 4 - smallest
+            [width * 0.21, width * 0.26],   // Layer 0 - background
+            [width * 0.10, width * 0.18],   // Layer 1
+            [width * 0.04, width * 0.08],   // Layer 2
+            [width * 0.015, width * 0.036], // Layer 3
+            [width * 0.04, width * 0.07]  // Layer 4 - foreground
         ];
         this.size = random(sizeRange[layer][0], sizeRange[layer][1]);
 
         // Brightness: darkest at back, brightest at front (0-100 scale)
-        this.brightness = map(layer, 0, 4, 15, 100);
+        this.brightness = map(layer, 0, 4, 10, 100);
 
-        // Alpha/opacity: more opaque so layers are visible
-        this.alpha = map(layer, 0, 4, 50, 85);
+        // Alpha will be calculated dynamically using global foreAlpha
+        this.baseAlpha = 20; // Minimum alpha for back layers
 
-        // Speed varies by layer
-        this.speed = random(4 + layer * 1, 8 + layer * 2);
+        // Speed varies by layer (scales with width)
+        let baseSpeed = width * 0.003;
+        this.speed = random(baseSpeed + layer * baseSpeed * 0.25, baseSpeed * 2 + layer * baseSpeed * 0.5);
 
         // Rotation direction alternates with movement
         this.rotationSpeed = this.movesOutward ? 0.04 + layer * 0.02 : -(0.04 + layer * 0.02);
@@ -198,12 +212,13 @@ class Particle {
         this.z = map(layer, 0, 4, 0.6, 1.2);
 
         this.maxRadius = maxDist;
+        this.minRadius = width * 0.02; // Inner radius scales with width
 
         // Initialize radius based on progress and direction
         if (this.movesOutward) {
             this.radius = progress * maxDist;
         } else {
-            this.radius = 30 + progress * (maxDist - 30);
+            this.radius = this.minRadius + progress * (maxDist - this.minRadius);
         }
 
         // Store palette index instead of fixed color - color will be computed from current palette
@@ -217,6 +232,12 @@ class Particle {
         // Get interpolated color from current palette based on stored index
         let currentPalette = getCurrentPalette();
         return currentPalette[this.colorIndex];
+    }
+
+    getCurrentAlpha() {
+        // Dynamically calculate alpha based on layer and animated foreAlpha
+        // Back layers (0) use baseAlpha, front layers (4) use global foreAlpha
+        return map(this.layer, 0, 4, this.baseAlpha, foreAlpha);
     }
 
     update() {
@@ -252,7 +273,7 @@ class Particle {
                 this.trail = [];
             }
         } else {
-            if (this.radius < 30) {
+            if (this.radius < this.minRadius) {
                 this.radius = this.maxRadius;
                 this.shootAngle = this.baseAngle + random(-0.3, 0.3);
                 this.trail = [];
@@ -270,10 +291,11 @@ class Particle {
         let h = currentColor[0];
         let s = currentColor[1];
         let b = this.brightness; // Use layer-based brightness
+        let alpha = this.getCurrentAlpha(); // Get animated alpha
 
         // Draw trail
         for (let i = 0; i < this.trail.length; i++) {
-            let trailAlpha = map(i, 0, this.trail.length - 1, 5, this.alpha * 0.6);
+            let trailAlpha = map(i, 0, this.trail.length - 1, 5, alpha * 0.6);
             let trailSize = map(i, 0, this.trail.length - 1, scaledSize * 0.1, scaledSize * 0.5);
 
             noStroke();
@@ -285,7 +307,7 @@ class Particle {
         let glowLayers = floor(map(this.layer, 0, 4, 4, 8));
 
         for (let i = glowLayers; i > 0; i--) {
-            let glowAlpha = map(i, glowLayers, 0, this.alpha * 0.1, this.alpha);
+            let glowAlpha = map(i, glowLayers, 0, alpha * 0.1, alpha);
             let sizeMultiplier = map(i, 0, glowLayers, 1, 2.2);
 
             noStroke();
@@ -295,7 +317,7 @@ class Particle {
 
         // Draw center - brighter for front layers
         let centerBrightness = min(100, b + 15);
-        let centerAlpha = map(this.layer, 0, 4, this.alpha * 0.7, this.alpha);
+        let centerAlpha = map(this.layer, 0, 4, alpha * 0.7, alpha);
         fill(h, s * 0.8, centerBrightness, centerAlpha);
         ellipse(x, y, scaledSize * 0.4, scaledSize * 0.4);
     }
@@ -303,7 +325,7 @@ class Particle {
 
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
-    maxDist = max(width, height) * 0.7;
+    maxDist = width * 0.7;
 
     // Recreate the blurred black hole for new size
     createBlackHoleBuffer();
